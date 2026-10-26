@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="brand/handoff-mark.svg" type="image/svg+xml">
+<title>Handoff</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Turn a meeting transcript into reviewed action items and post the recap to Slack.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a three-step workbench. Transcript and review side by side, the Slack post across the bottom. */
+:root {
+  --bg: #F3F4F6;
+  --surface: #FFFFFF;
+  --ink: #16202E;
+  --muted: #5A6577;
+  --line: #DCE0E6;
+  --soft: #EDEFF3;
+  --accent: #E8920C;
+  --accent-ink: #16202E;
+  --ok: #1E7F54;
+  --ok-bg: #E3F3EA;
+  --warn: #9A4A06;
+  --warn-bg: #FCEFD9;
+  --danger: #B42318;
+  --focus: #2F5BEA;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E131B; --surface: #161D28; --ink: #E6EAF0; --muted: #9AA5B5; --line: #2A3342; --soft: #1D2532;
+    --accent: #F2A93B; --accent-ink: #16202E; --ok: #5BCB95; --ok-bg: #12291F; --warn: #F2B866; --warn-bg: #2C2213;
+    --danger: #F97066; --focus: #7C9BFF; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E131B; --surface: #161D28; --ink: #E6EAF0; --muted: #9AA5B5; --line: #2A3342; --soft: #1D2532;
+  --accent: #F2A93B; --accent-ink: #16202E; --ok: #5BCB95; --ok-bg: #12291F; --warn: #F2B866; --warn-bg: #2C2213;
+  --danger: #F97066; --focus: #7C9BFF; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1200px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px; display: grid; gap: 20px; }
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand svg { width: 34px; height: 34px; flex: none; }
+.brand b { font-family: var(--display); font-size: 24px; letter-spacing: -0.02em; }
+.brand span { color: var(--muted); font-size: 14px; }
+.privacy { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.privacy i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+@media (max-width: 920px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.step { display: flex; align-items: center; gap: 10px; }
+.step em { font-style: normal; font-family: var(--mono); font-size: 12px; font-weight: 500; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--surface); }
+.step h2 { margin: 0; font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.hint { color: var(--muted); font-size: 13px; margin: 0; }
+
+textarea, input[type="text"], input[type="url"], input[type="date"], select {
+  font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+textarea { font-family: var(--mono); font-size: 13px; line-height: 1.55; min-height: 380px; resize: vertical; }
+:is(textarea, input, select, button, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; }
+label.field small { font-weight: 400; color: var(--muted); }
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button { font: inherit; font-size: 14px; font-weight: 500; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+button:hover { background: var(--soft); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.primary:hover { filter: brightness(1.05); background: var(--accent); }
+button.quiet { border-color: transparent; background: transparent; color: var(--muted); padding-inline: 8px; }
+button.quiet:hover { color: var(--ink); background: var(--soft); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+.summary { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--ink); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+
+.items { display: grid; gap: 10px; }
+.item { border: 1px solid var(--line); border-radius: 9px; padding: 12px; display: grid; gap: 10px; background: var(--surface); }
+.item.off { opacity: .55; }
+.item.needs-owner { border-color: var(--warn); }
+.item-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.item-top input[type="checkbox"] { margin-top: 10px; width: 17px; height: 17px; accent-color: var(--accent); }
+.item-meta { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding-left: 27px; }
+@media (max-width: 560px) { .item-meta { grid-template-columns: minmax(0, 1fr); } }
+.item-meta select, .item-meta input { font-size: 13.5px; padding: 6px 8px; }
+.conf { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.conf.low { color: var(--warn); }
+details.src { padding-left: 27px; font-size: 12.5px; color: var(--muted); }
+details.src summary { cursor: pointer; width: max-content; }
+details.src blockquote { margin: 6px 0 0; padding: 8px 10px; background: var(--soft); border-radius: 6px; font-family: var(--mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.empty { border: 1px dashed var(--line); border-radius: 9px; padding: 24px; text-align: center; color: var(--muted); font-size: 14px; }
+
+.post { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+@media (max-width: 920px) { .post { grid-template-columns: minmax(0, 1fr); } }
+.settings { display: grid; gap: 14px; }
+.two { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; }
+@media (max-width: 480px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+.status { font-size: 13.5px; min-height: 20px; margin: 0; }
+.status.ok { color: var(--ok); } .status.err { color: var(--danger); } .status.warn { color: var(--warn); }
+
+.chat { border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.chat-bar { display: flex; justify-content: space-between; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; background: var(--soft); }
+.chat-bar span { color: var(--muted); font-weight: 400; font-family: var(--mono); font-size: 12px; }
+.msg { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; padding: 14px; }
+.msg .av { width: 36px; height: 36px; border-radius: 8px; background: var(--ink); display: grid; place-items: center; }
+.msg .av svg { width: 24px; height: 24px; }
+.msg-head { font-size: 14px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.msg-head b { font-weight: 600; }
+.msg-head .tag { font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 3px; background: var(--soft); color: var(--muted); }
+.msg-head time { color: var(--muted); font-size: 12px; }
+.msg-body { font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.raw { font-size: 12.5px; color: var(--muted); }
+.raw pre { margin: 6px 0 0; padding: 10px; background: var(--soft); border-radius: 6px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (prefers-reduced-motion: no-preference) { .item { transition: opacity .15s, border-color .15s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="var(--ink)"/><path d="M8 7.5h16a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H14l-5 4v-4H8a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3z" fill="var(--accent)"/><path d="M10.5 15.2l3.3 3.3 7.2-7.2M17.3 11.3h3.7V15" fill="none" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><b>Handoff</b> <span>Meeting action items to Slack</span></div>
+    </div>
+    <p class="privacy"><i></i>Transcripts stay in your browser. Only the final message is sent.</p>
+  </header>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="h1">
+      <div class="panel-head">
+        <div class="step"><em>1</em><h2 id="h1">Paste the transcript</h2></div>
+        <div class="row">
+          <button class="quiet" id="sampleBtn" type="button">Load sample</button>
+          <button class="quiet" id="clearBtn" type="button">Clear</button>
+        </div>
+      </div>
+      <p class="hint">One line per speaker, like <code>Maria: I'll send the deck by Friday</code>. Timestamps are fine.</p>
+      <label class="sr" for="transcript">Meeting transcript</label>
+      <textarea id="transcript" spellcheck="false" placeholder="Paste a transcript from Zoom, Meet, Teams or your notes…"></textarea>
+      <div class="row">
+        <button class="primary" id="extractBtn" type="button">Find action items</button>
+        <span class="hint" id="parseInfo"></span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="h2">
+      <div class="panel-head">
+        <div class="step"><em>2</em><h2 id="h2">Review action items</h2></div>
+        <button class="quiet" id="addBtn" type="button">+ Add item</button>
+      </div>
+      <div class="summary" id="summary"></div>
+      <div class="items" id="items"></div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="h3">
+    <div class="panel-head">
+      <div class="step"><em>3</em><h2 id="h3">Post the recap to Slack</h2></div>
+    </div>
+    <div class="post">
+      <div class="settings">
+        <div class="two">
+          <label class="field">Meeting name<input type="text" id="title" value="Weekly Growth Sync"></label>
+          <label class="field">Date<input type="date" id="date"></label>
+        </div>
+        <label class="field">Post to channel<select id="channelSel"></select></label>
+        <div id="otherWrap" class="settings" hidden>
+          <label class="field">Channel name <small>Shown above the preview so you post to the right place.</small><input type="text" id="channel" value="#growth-team"></label>
+          <label class="field">Slack incoming webhook URL <small>Each webhook posts to one channel. It's kept in this tab only.</small><input type="url" id="webhook" placeholder="https://hooks.slack.com/services/…" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <label class="toggle"><input type="checkbox" id="groupBy" checked> Group items by owner</label>
+        <div class="row">
+          <button class="primary" id="postBtn" type="button">Post to Slack</button>
+          <button id="copyBtn" type="button">Copy message</button>
+        </div>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </div>
+      <div style="display:grid;gap:10px;min-width:0">
+        <div class="chat">
+          <div class="chat-bar"><span id="chanLabel">#growth-team</span><span>Preview</span></div>
+          <div class="msg">
+            <div class="av"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 7.5h16a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H14l-5 4v-4H8a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3z" fill="var(--accent)"/><path d="M10.5 15.2l3.3 3.3 7.2-7.2M17.3 11.3h3.7V15" fill="none" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div style="min-width:0">
+              <div class="msg-head"><b>Handoff</b><span class="tag">APP</span><time id="msgTime"></time></div>
+              <div class="msg-body" id="preview"></div>
+            </div>
+          </div>
+        </div>
+        <details class="raw"><summary>Show the raw Slack text</summary><pre id="rawText"></pre></details>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// PARSER START
+const Handoff = (() => {
+  const LINE_RE = /^\s*(?:[\[(]?\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?[\])]?\s*[-–]?\s*)?([A-Z][\w.'’-]*(?:\s[A-Z][\w.'’-]*){0,2})\s*:\s*(.+)$/;
+  const NOT_SPEAKERS = /^(https?|note|notes|agenda|date|time|attendees|participants|subject|topic|meeting|re)$/i;
+  const DAYS = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues|tue|wed|thurs|thu|fri';
+  const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec';
+  const DUE_RE = new RegExp('(?:\\b(?:by|before|on|until|due|for)\\s+)?(?:the\\s+)?\\b(end of (?:the )?(?:day|week|month|sprint)|eod|eow|cob|today|tonight|tomorrow|this week|next week|(?:next |this )?(?:' + DAYS + ')(?: morning| afternoon)?|(?:' + MONTHS + ')\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + MONTHS + ')|\\d{1,2}/\\d{1,2})\\b', 'i');
+  const EXPLICIT = /^(?:action items?|ai|todo|to-do|follow[- ]?up|next steps?)\s*[:\-–]\s*(.+)$/i;
+  const REQ_SOMEONE = /\b(?:can|could|would) (?:someone|somebody|anyone)(?: please)?\s+(.+)/i;
+  const REQ_YOU = /\b(?:can|could|would|will) you(?: please)?\s+(.+)/i;
+  const NEED = /\b(?:we (?:still )?need (?:someone |somebody )?to|someone (?:needs|has) to|someone should|we still need someone to)\s+(.+)/i;
+  const COMMIT = /\b(?:i'll|i’ll|i will|i'm going to|i’m going to|i am going to|i'm gonna|i can|let me|i need to)\s+/gi;
+  const COMMIT_SKIP = /^(?:be|admit|say|bet|guess|think|see|hear|imagine|tell you|leave|pass|only|also be|just say|not)\b/i;
+  const AFFIRM = /^(?:(?:sure|yes|yep|yeah|yup|ok|okay|on it|will do|got it|can do|absolutely|noted|sounds good|happy to|i've got it|i got it)[\s,.!]*)+$/i;
+  const VAGUE = /^(?:\w+\s+)?(?:it|that|this|those|them|one)\b/i;
+
+  function parseUtterances(text) {
+    const out = [], attendees = [];
+    for (const raw of String(text).split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = line.match(LINE_RE);
+      if (m && /^(attendees|participants)$/i.test(m[1])) { m[2].split(/,|;| and /).map(s => s.trim()).filter(Boolean).forEach(n => attendees.push(n)); continue; }
+      if (m && !NOT_SPEAKERS.test(m[1])) out.push({ speaker: m[1].trim(), text: m[2].trim() });
+      else if (out.length) out[out.length - 1].text += ' ' + line;
+      else out.push({ speaker: null, text: line });
+    }
+    // Match first-name speakers ("Tom") to full attendee names ("Tom Reyes")
+    for (const u of out) {
+      if (u.speaker && !/\s/.test(u.speaker)) {
+        const full = attendees.find(a => a.split(/\s+/)[0].toLowerCase() === u.speaker.toLowerCase());
+        if (full) u.speaker = full;
+      }
+    }
+    return { utterances: out, attendees };
+  }
+  function splitSentences(t) { return t.split(/(?<=[.!?])\s+(?=[A-Z"“'])/).map(s => s.trim()).filter(Boolean); }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+  function titleDue(s) { return s.replace(/\s+/g, ' ').trim().split(' ').map(w => /^(of|the)$/i.test(w) ? w.toLowerCase() : (/^(eod|eow|cob)$/i.test(w) ? w.toUpperCase() : cap(w.toLowerCase()))).join(' '); }
+
+  function splitDue(text) {
+    const m = text.match(DUE_RE);
+    if (!m) return { text, due: '' };
+    return { text: (text.slice(0, m.index) + ' ' + text.slice(m.index + m[0].length)), due: titleDue(m[1]) };
+  }
+  function cleanTask(t) {
+    t = t.split(/\s(?:so that|so we|so they|so it|because|since|but|if that)\s/i)[0];
+    t = t.replace(/^(?:also|just|quickly|definitely|then|go ahead and|make sure (?:to|that)|try to|probably)\s+/i, '');
+    t = t.replace(/^(?:also|just|then)\s+/i, '');
+    t = t.replace(/\b(?:for me|for us|please|thanks|thank you)\b/gi, '');
+    t = t.replace(/\s(?:anyway|at some point|as well|too|asap|real quick)\s*[.!?]*$/i, '');
+    t = t.replace(/\s+([,.;:!?])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+    t = t.replace(/[\s,;:–-]+$/, '').replace(/[.!?,]+$/, '').trim();
+    return cap(t);
+  }
+  function build(raw) { const d = splitDue(raw); return { task: cleanTask(d.text), due: d.due }; }
+
+  function analyze(s, speaker, names) {
+    const t = s.trim();
+    let m;
+    const findName = (str) => { for (const n of names) { if (new RegExp('\\b' + n.first + '\\b').test(str)) return n.full; } return null; };
+    const assignIn = (str) => {
+      for (const n of names) {
+        const re = new RegExp('\\b' + n.first + '(?:\\s+' + (n.last || 'zzz') + ')?(?:\'s|’s| is)?\\s+(?:will|is going to|going to|gonna|should|needs to|has to|to|can)\\s+(.+)');
+        const mm = str.match(re);
+        if (mm) return { owner: n.full, raw: mm[1] };
+      }
+      return null;
+    };
+    if ((m = t.match(EXPLICIT))) {
+      const a = assignIn(m[1]);
+      if (a) return { kind: 'explicit', owner: a.owner, ...build(a.raw), confidence: 'high' };
+      const at = m[1].match(/^@?(\w+)\s*[-–:]\s*(.+)$/);
+      const nm = at && names.find(n => n.first.toLowerCase() === at[1].toLowerCase());
+      if (nm) return { kind: 'explicit', owner: nm.full, ...build(at[2]), confidence: 'high' };
+      return { kind: 'explicit', owner: null, ...build(m[1]), confidence: 'medium' };
+    }
+    if ((m = t.match(REQ_SOMEONE))) return { kind: 'request', owner: null, ...build(m[1]), confidence: 'low' };
+    if ((m = t.match(REQ_YOU))) {
+      const before = t.slice(0, m.index);
+      let owner = findName(before);
+      if (!owner) { const voc = t.match(/,\s*([A-Z]\w+)\s*[?.!]*$/); if (voc) owner = findName(voc[1]); }
+      const raw = owner ? m[1].replace(/,\s*[A-Z]\w+\s*[?.!]*$/, '') : m[1];
+      return { kind: 'request', owner, ...build(raw), confidence: owner ? 'high' : 'low' };
+    }
+    const a = assignIn(t);
+    if (a) return { kind: 'assign', owner: a.owner, ...build(a.raw), confidence: 'high' };
+    COMMIT.lastIndex = 0;
+    for (const cm of t.matchAll(COMMIT)) {
+      const rest = t.slice(cm.index + cm[0].length);
+      if (COMMIT_SKIP.test(rest)) continue;
+      const b = build(rest);
+      if (!b.task) continue;
+      const vague = VAGUE.test(b.task) || b.task.length < 10;
+      return { kind: 'commit', owner: speaker, ...b, vague, confidence: speaker ? 'high' : 'low' };
+    }
+    if ((m = t.match(NEED))) return { kind: 'need', owner: null, ...build(m[1]), confidence: 'low' };
+    if (AFFIRM.test(t)) return { kind: 'affirm' };
+    return null;
+  }
+
+  function extract(text) {
+    const { utterances, attendees } = parseUtterances(text);
+    const people = [...new Set([...utterances.map(u => u.speaker).filter(Boolean), ...attendees])];
+    const names = people.map(full => { const p = full.split(/\s+/); return { full, first: p[0].replace(/[^\w'-]/g, ''), last: p[1] ? p[1].replace(/[^\w'-]/g, '') : '' }; });
+    const items = [];
+    let last = null, seq = 0;
+    const key = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').slice(0, 48);
+    utterances.forEach((u, ui) => {
+      for (const s of splitSentences(u.text)) {
+        const r = analyze(s, u.speaker, names);
+        if (!r) continue;
+        const near = last && ui - last.ui <= 2 && ui !== last.ui;
+        if (r.kind === 'affirm') {
+          if (near && !last.item.owner && u.speaker && u.speaker !== last.speaker) { last.item.owner = u.speaker; last.item.confidence = 'medium'; last.item.source += '\n' + u.speaker + ': ' + s; last = null; }
+          continue;
+        }
+        if (r.kind === 'commit' && r.vague) {
+          if (near && !last.item.owner && u.speaker !== last.speaker) {
+            last.item.owner = u.speaker; last.item.confidence = 'medium';
+            if (r.due && !last.item.due) last.item.due = r.due;
+            last.item.source += '\n' + u.speaker + ': ' + s; last = null; continue;
+          }
+          if (near && last.item.owner === u.speaker) { if (r.due && !last.item.due) last.item.due = r.due; last.item.source += '\n' + u.speaker + ': ' + s; continue; }
+          if (r.task.length < 10) continue;
+        }
+        if (!r.task) continue;
+        if (items.some(it => key(it.task) === key(r.task))) continue;
+        const item = { id: 'i' + (++seq), task: r.task, owner: r.owner || '', due: r.due || '', confidence: r.confidence, source: (u.speaker || 'Unknown') + ': ' + s, include: true };
+        items.push(item);
+        last = (r.kind === 'commit') ? null : { item, ui, speaker: u.speaker };
+      }
+    });
+    return { items, people, utteranceCount: utterances.length };
+  }
+
+  function message(items, opts) {
+    const list = items.filter(i => i.include && i.task.trim());
+    const head = '*Action items: ' + (opts.title || 'Meeting recap') + '*' + (opts.dateLabel ? ' (' + opts.dateLabel + ')' : '');
+    if (!list.length) return head + '\nNo action items from this meeting.';
+    const line = (i, withOwner) => '• ' + (withOwner ? '*' + (i.owner || 'Unassigned') + '*: ' : '') + i.task.trim() + (i.due ? ' _(due ' + i.due + ')_' : '');
+    const owners = new Set(list.map(i => i.owner || 'Unassigned'));
+    let body = head + '\n' + list.length + (list.length === 1 ? ' item' : ' items') + ' · ' + owners.size + (owners.size === 1 ? ' owner' : ' owners') + '\n';
+    if (opts.group) {
+      const order = [...owners].sort((a, b) => (a === 'Unassigned') - (b === 'Unassigned') || a.localeCompare(b));
+      for (const o of order) body += '\n*' + o + '*\n' + list.filter(i => (i.owner || 'Unassigned') === o).map(i => line(i, false)).join('\n') + '\n';
+    } else {
+      body += '\n' + list.map(i => line(i, true)).join('\n') + '\n';
+    }
+    return body.trimEnd() + '\n\n_Reply in thread if anything is missing or wrong._';
+  }
+  return { extract, message, parseUtterances };
+})();
+// PARSER END
+
+const SAMPLE = `Meeting: Weekly Growth Sync
+[00:00:04] Maria Chen: Okay, let's get started. Three things today: the October campaign results, the pricing page test, and the onboarding emails.
+[00:01:12] Dev Patel: Campaign numbers are in. Paid social did well, but the search spend was mostly wasted on broad-match terms.
+[00:01:40] Maria Chen: Got it. Dev, can you put together a one-page summary of the campaign results by Thursday?
+[00:01:46] Dev Patel: Yes, I'll have it in the shared drive by Thursday.
+[00:02:30] Sam Okafor: On search, I'll pause the broad-match keywords today and move that budget to the retargeting set.
+[00:03:15] Lena Fischer: For the pricing page test, variant B is ahead but we only have about 600 visitors per arm.
+[00:03:31] Maria Chen: Let's not call it yet. Lena will extend the test for another two weeks.
+[00:03:40] Lena Fischer: Sure. I'll also share the interim numbers in the channel on Friday.
+[00:04:22] Maria Chen: Onboarding emails. The welcome email still links to the old help center.
+[00:04:30] Sam Okafor: Can someone fix that link? It's been broken since the migration.
+[00:04:36] Lena Fischer: I can take that.
+[00:05:02] Maria Chen: Great. Action item: Dev to check with legal whether we can use the customer quotes in email three.
+[00:05:30] Dev Patel: Noted. I think legal will be fine with it, but I'll confirm.
+[00:06:10] Maria Chen: Last thing, we still need someone to draft the November newsletter.
+[00:06:18] Sam Okafor: I'll be out Wednesday, but I can draft it by next Monday.
+[00:06:40] Maria Chen: Perfect. I'll send the recap after this call. Thanks everyone.`;
+
+// CHANNELS: set up once by whoever installs Handoff. One Slack incoming webhook per channel.
+// Leave the list empty to show a field where the user pastes a webhook URL instead.
+const CHANNELS = [
+  { name: 'HR HERMESSI TEAM', webhook: 'https://hooks.slack.com/services/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' },
+  { name: 'Customer Success Team', webhook: 'https://hooks.slack.com/services/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' },
+];
+
+const $ = id => document.getElementById(id);
+const state = { items: [], people: [] };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function runExtract() {
+  const text = $('transcript').value;
+  if (!text.trim()) { state.items = []; state.people = []; $('parseInfo').textContent = 'Paste a transcript first.'; render(); return; }
+  const r = Handoff.extract(text);
+  state.items = r.items; state.people = r.people;
+  const t = text.match(/^\s*(?:meeting|subject|topic)\s*:\s*(.+)$/im);
+  if (t) $('title').value = t[1].trim();
+  $('parseInfo').textContent = r.utteranceCount + ' lines read · ' + r.people.length + ' speakers · ' + r.items.length + ' items found';
+  render();
+}
+
+function render() {
+  const box = $('items');
+  const inc = state.items.filter(i => i.include);
+  const noOwner = inc.filter(i => !i.owner).length;
+  $('summary').innerHTML = state.items.length
+    ? '<span class="pill">' + inc.length + ' of ' + state.items.length + ' selected</span>' +
+      (noOwner ? '<span class="pill warn">' + noOwner + (noOwner === 1 ? ' needs an owner' : ' need owners') + '</span>' : '<span class="pill ok">Every item has an owner</span>')
+    : '';
+  if (!state.items.length) {
+    box.innerHTML = '<div class="empty">No action items yet. Paste a transcript and choose <b>Find action items</b>, or add one by hand.</div>';
+  } else {
+    const opts = o => ['<option value="">Unassigned</option>'].concat(state.people.map(p => '<option' + (p === o ? ' selected' : '') + '>' + esc(p) + '</option>')).join('');
+    box.innerHTML = state.items.map(i => `
+      <div class="item${i.include ? '' : ' off'}${i.include && !i.owner ? ' needs-owner' : ''}" data-id="${i.id}">
+        <div class="item-top">
+          <input type="checkbox" id="inc-${i.id}" data-f="include" ${i.include ? 'checked' : ''} aria-label="Include this item">
+          <input type="text" id="task-${i.id}" data-f="task" value="${esc(i.task)}" aria-label="Task">
+          <button class="quiet" type="button" data-del="${i.id}" aria-label="Remove item">✕</button>
+        </div>
+        <div class="item-meta">
+          <select id="own-${i.id}" data-f="owner" aria-label="Owner">${opts(i.owner)}</select>
+          <input type="text" id="due-${i.id}" data-f="due" value="${esc(i.due)}" placeholder="No due date" aria-label="Due">
+          <span class="conf ${i.confidence === 'low' ? 'low' : ''}" title="How sure the extractor is">${i.confidence === 'manual' ? 'added' : i.confidence}</span>
+        </div>
+        ${i.source ? `<details class="src"><summary>From the transcript</summary><blockquote>${esc(i.source).replace(/\n/g, '<br>')}</blockquote></details>` : ''}
+      </div>`).join('');
+  }
+  renderPreview();
+}
+
+function dateLabel() {
+  const v = $('date').value;
+  if (!v) return '';
+  const d = new Date(v + 'T12:00:00');
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function currentMessage() { return Handoff.message(state.items, { title: $('title').value.trim(), dateLabel: dateLabel(), group: $('groupBy').checked }); }
+function mrkdwnToHtml(s) {
+  return esc(s).replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(^|[\s(])_([^_\n]+)_/g, '$1<i>$2</i>');
+}
+function renderPreview() {
+  const msg = currentMessage();
+  $('preview').innerHTML = mrkdwnToHtml(msg);
+  $('rawText').textContent = msg;
+  $('chanLabel').textContent = currentChannel().name;
+  $('msgTime').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+$('items').addEventListener('input', e => {
+  const el = e.target, card = el.closest('.item'); if (!card) return;
+  const it = state.items.find(i => i.id === card.dataset.id); const f = el.dataset.f; if (!it || !f) return;
+  it[f] = el.type === 'checkbox' ? el.checked : el.value;
+  if (f === 'owner' || f === 'include') { const focusId = el.id; render(); const n = $(focusId); if (n) n.focus(); }
+  else renderPreview();
+});
+$('items').addEventListener('click', e => {
+  const id = e.target.dataset && e.target.dataset.del; if (!id) return;
+  state.items = state.items.filter(i => i.id !== id); render();
+});
+$('addBtn').addEventListener('click', () => {
+  const id = 'm' + Date.now();
+  state.items.push({ id, task: '', owner: '', due: '', confidence: 'manual', source: '', include: true });
+  render(); const n = $('task-' + id); if (n) n.focus();
+});
+$('extractBtn').addEventListener('click', runExtract);
+$('sampleBtn').addEventListener('click', () => { $('transcript').value = SAMPLE; runExtract(); });
+$('clearBtn').addEventListener('click', () => { $('transcript').value = ''; state.items = []; state.people = []; $('parseInfo').textContent = ''; render(); $('transcript').focus(); });
+['title', 'date', 'channel'].forEach(id => $(id).addEventListener('input', renderPreview));
+
+function currentChannel() {
+  const v = $('channelSel').value;
+  if (v !== 'other' && CHANNELS[+v]) return { name: CHANNELS[+v].name, webhook: CHANNELS[+v].webhook };
+  return { name: $('channel').value.trim() || '#channel', webhook: $('webhook').value.trim() };
+}
+function setupChannels() {
+  const sel = $('channelSel');
+  sel.innerHTML = CHANNELS.map((c, i) => '<option value="' + i + '">' + esc(c.name) + '</option>').join('') +
+    '<option value="other">' + (CHANNELS.length ? 'Other channel (paste a webhook)…' : 'Paste a webhook URL') + '</option>';
+  const sync = () => { $('otherWrap').hidden = sel.value !== 'other'; setStatus(''); renderPreview(); };
+  sel.addEventListener('change', sync);
+  if (!CHANNELS.length) sel.closest('label').hidden = true;
+  sync();
+}
+$('groupBy').addEventListener('change', renderPreview);
+
+function setStatus(text, kind) { const s = $('status'); s.textContent = text; s.className = 'status ' + (kind || ''); }
+
+$('copyBtn').addEventListener('click', () => {
+  const msg = currentMessage();
+  const fallback = () => {
+    const d = $('rawText').closest('details'); d.open = true;
+    const r = document.createRange(); r.selectNodeContents($('rawText'));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    setStatus('Copy is blocked here. The message is selected below: press Ctrl+C or ⌘C.', 'warn');
+  };
+  try {
+    navigator.clipboard.writeText(msg).then(() => setStatus('Copied. Paste it into Slack.', 'ok'), fallback);
+  } catch (e) { fallback(); }
+});
+
+$('postBtn').addEventListener('click', async () => {
+  const ch = currentChannel(), url = ch.webhook;
+  const inc = state.items.filter(i => i.include && i.task.trim());
+  if (!inc.length) return setStatus('Select at least one action item before posting.', 'err');
+  if (!/^https:\/\/hooks\.slack\.com\/(services|workflows|triggers)\//.test(url)) return setStatus('Add a Slack webhook URL that starts with https://hooks.slack.com/', 'err');
+  const btn = $('postBtn'); btn.disabled = true; setStatus('Posting…');
+  try {
+    await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'payload=' + encodeURIComponent(JSON.stringify({ text: currentMessage(), mrkdwn: true })) });
+    const missing = inc.filter(i => !i.owner).length;
+    setStatus('Sent to ' + ch.name + '. Slack does not confirm delivery to the browser, so check the channel.' + (missing ? ' ' + missing + ' item(s) went out without an owner.' : ''), 'ok');
+  } catch (e) {
+    setStatus('This page could not reach Slack (the hosted preview blocks outside requests). Use Copy message, or open index.html locally to post directly.', 'err');
+  } finally { btn.disabled = false; }
+});
+
+(function init() {
+  const d = new Date(); $('date').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  setupChannels();
+  $('transcript').value = SAMPLE; runExtract();
+})();
+</script>
+</body>
+</html>
